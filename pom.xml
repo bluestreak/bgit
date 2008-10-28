@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
+    
+    <parent>
+        <groupId>com.atlassian.bamboo.plugins.base</groupId>
+        <artifactId>bamboo-plugin-base</artifactId>
+        <version>5</version>
+    </parent>
+    
+    <modelVersion>4.0.0</modelVersion>
+    <groupId>com.atlassian.labs.bamboo.git</groupId>
+    <artifactId>git-plugin</artifactId>
+    <version>1.0-SNAPSHOT</version>
+    
+    <name><!-- TODO: Add a name for your plugin --></name>
+    <packaging>atlassian-plugin</packaging>
+    
+    <properties>
+        <atlassian.plugin.key>com.atlassian.labs.bamboo.git.git-plugin</atlassian.plugin.key>
+        <!-- 
+            Change this property to compile your plugin against different Bamboo
+            versions.
+        -->
+        <atlassian.product.version>2.1.2</atlassian.product.version>
+        <jdkLevel>1.5</jdkLevel>
+    </properties>
+    <build>
+      <plugins>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-compiler-plugin</artifactId>
+          <!-- best lock down version of the plugin too -->
+          <configuration>
+            <source>1.5</source>
+            <target>1.5</target>
+          </configuration>
+        </plugin>
+      </plugins>
+    </build>
+
+    <!-- TODO: Add project description -->
+    <!--
+    <description></description>
+	<url></url>
+    -->
+    
+    <!-- TODO: Complete developer details -->
+    <!--
+	<developers>
+		<developer>
+			<name>John Smith</name>
+			<organization>Example Company</organization>
+		</developer>
+	</developers>
+	-->
+    
+    <!-- TODO: Complete source control details -->
+    <!--
+    <scm>
+		<connection></connection>
+		<developerConnection></developerConnection>
+		<url></url>
+	</scm>
+	-->
+    
+</project>

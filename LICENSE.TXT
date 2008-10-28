@@ -1,0 +1,1 @@
+This plugin is licensed LGPL due to the inclusion of the Git library
