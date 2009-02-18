@@ -60,7 +60,7 @@ public final class GitClone {
 
     IClient client = ClientManager.getInstance().getPreferredClient();
     IGitClone gitClone = client.getGitCloneInstance();
-    return gitClone.clone(workingDirectoryPath, repository);
+    return gitClone.clone(workingDirectoryPath, repository.toExternalForm());
   }
 
   /**
@@ -97,7 +97,7 @@ public final class GitClone {
 
     IClient client = ClientManager.getInstance().getPreferredClient();
     IGitClone gitClone = client.getGitCloneInstance();
-    return gitClone.clone(workingDirectoryPath, options, repository);
+    return gitClone.clone(workingDirectoryPath, options, repository.toExternalForm());
   }
 
   /**
@@ -133,7 +133,7 @@ public final class GitClone {
 
     IClient client = ClientManager.getInstance().getPreferredClient();
     IGitClone gitClone = client.getGitCloneInstance();
-    return gitClone.clone(workingDirectoryPath, repository, directory);
+    return gitClone.clone(workingDirectoryPath, repository.toExternalForm(), directory);
   }
 
   /**
@@ -173,6 +173,6 @@ public final class GitClone {
 
     IClient client = ClientManager.getInstance().getPreferredClient();
     IGitClone gitClone = client.getGitCloneInstance();
-    return gitClone.clone(workingDirectoryPath, options, repository, directory);
+    return gitClone.clone(workingDirectoryPath, options, repository.toExternalForm(), directory);
   }
 }

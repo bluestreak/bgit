@@ -65,5 +65,10 @@
 		<url></url>
 	</scm>
 	-->
+    <scm>
+        <connection>scm:svn:http://svn.atlassian.com/svn/public/atlassian/bamboo/plugins/bamboo-plugin-archetype</connection>
+        <developerConnection>scm:svn:https://svn.atlassian.com/svn/public/atlassian/bamboo/plugins/bamboo-plugin-archetype</developerConnection>
+        <url>http://svn.atlassian.com/fisheye/browse/public/atlassian/bamboo/plugins/bamboo-plugin-archetype</url>
+    </scm>
     
 </project>
