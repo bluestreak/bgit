@@ -33,8 +33,6 @@ import org.apache.commons.lang.builder.EqualsBuilder;
 import org.apache.commons.lang.builder.HashCodeBuilder;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
-import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
 
 import java.io.File;
 import java.io.IOException;
@@ -112,14 +110,14 @@ public class GitRepository extends AbstractRepository implements WebRepositoryEn
 
     // -------------------------------------------------------------------------------------------------- Public Methods
 
-    public void addDefaultValues(@NotNull BuildConfiguration buildConfiguration)
+    public void addDefaultValues( BuildConfiguration buildConfiguration)
     {
         super.addDefaultValues(buildConfiguration);
         quietPeriodHelper.addDefaultValues(buildConfiguration);
     }
 
-    @NotNull
-    public synchronized BuildChanges collectChangesSinceLastBuild(@NotNull String planKey, @NotNull String lastVcsRevisionKey) throws RepositoryException
+    
+    public synchronized BuildChanges collectChangesSinceLastBuild( String planKey,  String lastVcsRevisionKey) throws RepositoryException
     {
         log.error("determing  if there have been changes since "+lastVcsRevisionKey);
         try
@@ -183,8 +181,8 @@ public class GitRepository extends AbstractRepository implements WebRepositoryEn
      * @param planKey - used for debugging only
      * @return
      */
-    @NotNull
-    private String detectCommitsForUrl(@NotNull String repositoryUrl, @Nullable final String lastRevisionChecked, @NotNull final List<Commit> commits, @NotNull String planKey) throws RepositoryException, IOException, JavaGitException
+    
+    private String detectCommitsForUrl( String repositoryUrl, final String lastRevisionChecked,  final List<Commit> commits,  String planKey) throws RepositoryException, IOException, JavaGitException
     {
         log.error("detecting commits for "+lastRevisionChecked);
         GitLog gitLog = new GitLog();
@@ -237,8 +235,8 @@ public class GitRepository extends AbstractRepository implements WebRepositoryEn
         return lastRevisionChecked;
     }
 
-    @NotNull
-    public String retrieveSourceCode(@NotNull String planKey, @Nullable String vcsRevisionKey) throws RepositoryException
+    
+    public String retrieveSourceCode( String planKey, String vcsRevisionKey) throws RepositoryException
     {
         log.error("retrieving source code");
         try
@@ -271,8 +269,8 @@ public class GitRepository extends AbstractRepository implements WebRepositoryEn
     }
 
 
-    @NotNull
-    public ErrorCollection validate(@NotNull BuildConfiguration buildConfiguration)
+    
+    public ErrorCollection validate( BuildConfiguration buildConfiguration)
     {
         ErrorCollection errorCollection = super.validate(buildConfiguration);
 
@@ -299,7 +297,7 @@ public class GitRepository extends AbstractRepository implements WebRepositoryEn
     }
 
 
-    public boolean isRepositoryDifferent(@NotNull Repository repository)
+    public boolean isRepositoryDifferent( Repository repository)
     {
         if (repository != null && repository instanceof GitRepository)
         {
@@ -315,7 +313,7 @@ public class GitRepository extends AbstractRepository implements WebRepositoryEn
         }
     }
 
-    public void prepareConfigObject(@NotNull BuildConfiguration buildConfiguration)
+    public void prepareConfigObject( BuildConfiguration buildConfiguration)
     {
         String repositoryKey = buildConfiguration.getString(SELECTED_REPOSITORY);
 
@@ -350,7 +348,7 @@ public class GitRepository extends AbstractRepository implements WebRepositoryEn
         }
     }
 
-    public void populateFromConfig(@NotNull HierarchicalConfiguration config)
+    public void populateFromConfig( HierarchicalConfiguration config)
     {
         super.populateFromConfig(config);
 
@@ -375,7 +373,7 @@ public class GitRepository extends AbstractRepository implements WebRepositoryEn
         quietPeriodHelper.populateFromConfig(config, this);
     }
 
-    @NotNull
+    
     public HierarchicalConfiguration toConfiguration()
     {
         HierarchicalConfiguration configuration = super.toConfiguration();
@@ -407,7 +405,7 @@ public class GitRepository extends AbstractRepository implements WebRepositoryEn
     }
 
 
-    public boolean isAdvancedOptionEnabled(@NotNull BuildConfiguration buildConfiguration)
+    public boolean isAdvancedOptionEnabled( BuildConfiguration buildConfiguration)
     {
         final boolean useExternals = buildConfiguration.getBoolean(USE_EXTERNALS, false);
         final boolean quietPeriodEnabled = quietPeriodHelper.isEnabled(buildConfiguration);
@@ -420,7 +418,7 @@ public class GitRepository extends AbstractRepository implements WebRepositoryEn
      *
      * @return The name
      */
-    @NotNull
+    
     public String getName()
     {
         return NAME;
@@ -646,8 +644,8 @@ public class GitRepository extends AbstractRepository implements WebRepositoryEn
     }
 
     @Override
-    @Nullable
-    public String getWebRepositoryUrlForCommit(@NotNull Commit commit)
+    
+    public String getWebRepositoryUrlForCommit( Commit commit)
     {
         ViewCvsFileLinkGenerator fileLinkGenerator = new ViewCvsFileLinkGenerator(webRepositoryUrl);
         return null;// fileLinkGenerator.getWebRepositoryUrlForCommit(commit, webRepositoryUrlRepoName, ViewCvsFileLinkGenerator.GIT_REPO_TYPE);
