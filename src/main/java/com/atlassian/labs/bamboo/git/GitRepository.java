@@ -68,6 +68,7 @@ public class GitRepository extends AbstractRepository implements WebRepositoryEn
     public static final String GIT_PASSPHRASE = REPO_PREFIX + "passphrase";
     public static final String GIT_AUTHTYPE = REPO_PREFIX + "authType";
     public static final String GIT_KEYFILE = REPO_PREFIX + "keyFile";
+    public static final String GIT_REMOTE_BRANCH = REPO_PREFIX + "remoteBranch";
 
 
     private static final String USE_EXTERNALS = REPO_PREFIX + "useExternals";
@@ -95,6 +96,7 @@ public class GitRepository extends AbstractRepository implements WebRepositoryEn
     private String keyFile;
     private String webRepositoryUrlRepoName;
     private String authType;
+    private String remoteBranch;
 
     // Quiet Period
     private final QuietPeriodHelper quietPeriodHelper = new QuietPeriodHelper(REPO_PREFIX);
@@ -131,7 +133,7 @@ public class GitRepository extends AbstractRepository implements WebRepositoryEn
     
     public synchronized BuildChanges collectChangesSinceLastBuild( String planKey,  String lastVcsRevisionKey) throws RepositoryException
     {
-        log.error("determing  if there have been changes since "+lastVcsRevisionKey);
+        log.error("determining if there have been changes for " + planKey + " since "+lastVcsRevisionKey);
         try
         {
 
@@ -203,7 +205,7 @@ public class GitRepository extends AbstractRepository implements WebRepositoryEn
         {
             opt.setOptLimitCommitAfter(true, lastRevisionChecked);
         }
-        List<GitLogResponse.Commit> gitCommits = gitLog.log(getCheckoutDirectory(planKey), opt, Ref.createBranchRef("origin/master"));
+        List<GitLogResponse.Commit> gitCommits = gitLog.log(getCheckoutDirectory(planKey), opt, Ref.createBranchRef("origin/"+remoteBranch));
         if (gitCommits.size() > 1)
         {
             gitCommits.remove(gitCommits.size()-1);
@@ -275,7 +277,7 @@ public class GitRepository extends AbstractRepository implements WebRepositoryEn
         GitMerge merge = new GitMerge();
 
         // FIXME: should really only merge to the target revision
-        merge.merge(sourceDir, Ref.createBranchRef("origin/master"));
+        merge.merge(sourceDir, Ref.createBranchRef("origin/"+remoteBranch));
 
         return detectCommitsForUrl(repositoryUrl, vcsRevisionKey, new ArrayList<Commit>(), planKey);
     }
@@ -295,6 +297,12 @@ public class GitRepository extends AbstractRepository implements WebRepositoryEn
         else
         {
             // FIXME: do validation
+        }
+        
+        String remoBranch = buildConfiguration.getString(GIT_REMOTE_BRANCH);
+        if (StringUtils.isEmpty(remoBranch))
+        {
+            errorCollection.addError(GIT_REMOTE_BRANCH, "Please specify the remote branch that will be checked out");
         }
 
         String webRepoUrl = buildConfiguration.getString(WEB_REPO_URL);
@@ -366,6 +374,7 @@ public class GitRepository extends AbstractRepository implements WebRepositoryEn
 
         setRepositoryUrl(config.getString(GIT_REPO_URL));
         setUsername(config.getString(GIT_USERNAME));
+        setRemoteBranch(config.getString(GIT_REMOTE_BRANCH));
         setAuthType(config.getString(GIT_AUTHTYPE));
         if (AUTH_SSH.equals(authType))
         {
@@ -390,6 +399,7 @@ public class GitRepository extends AbstractRepository implements WebRepositoryEn
     {
         HierarchicalConfiguration configuration = super.toConfiguration();
         configuration.setProperty(GIT_REPO_URL, getRepositoryUrl());
+        configuration.setProperty(GIT_REMOTE_BRANCH, getRemoteBranch());
         configuration.setProperty(GIT_USERNAME, getUsername());
         configuration.setProperty(GIT_AUTHTYPE, getAuthType());
         if (AUTH_SSH.equals(authType))
@@ -529,6 +539,26 @@ public class GitRepository extends AbstractRepository implements WebRepositoryEn
     {
         return repositoryUrl;
     }
+    
+    /**
+     * Specify the subversion repository we are using
+     *
+     * @param remoteBranch The subversion repository
+     */
+    public void setRemoteBranch(String remoteBranch)
+    {
+        this.remoteBranch = StringUtils.trim(remoteBranch);
+    }
+
+    /**
+     * Which repository URL are we using?
+     *
+     * @return The subversion repository
+     */
+    public String getRemoteBranch()
+    {
+        return remoteBranch;
+    }
 
 
     public String getSubstitutedRepositoryUrl()
@@ -665,19 +695,22 @@ public class GitRepository extends AbstractRepository implements WebRepositoryEn
 
     public String getHost()
     {
-        if (repositoryUrl == null)
-        {
-            return UNKNOWN_HOST;
-        }
-
-        try
-        {
-            URL url = new URL(getSubstitutedRepositoryUrl());
-            return url.getHost();
-        } catch (MalformedURLException e)
-        {
-            return UNKNOWN_HOST;
-        }
+    	return "localhost"; 
+    	// with the code below bamboo says UNKNOWN_HOST and I can't use remote triggers (slnc) 
+    	
+//        if (repositoryUrl == null)
+//        {
+//            return UNKNOWN_HOST;
+//        }
+//
+//        try
+//        {
+//            URL url = new URL(getSubstitutedRepositoryUrl());
+//            return url.getHost();
+//        } catch (MalformedURLException e)
+//        {
+//            return UNKNOWN_HOST;
+//        }
     }
 
     public boolean isQuietPeriodEnabled()
