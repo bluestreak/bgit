@@ -1,0 +1,45 @@
+<project name="gitplugin">
+
+    <path id="plugin.classpath">
+        <fileset dir="C:\Bamboo\webapp\WEB-INF\lib">
+            <include name="javagit-from-bamboo-plugin.jar"/>
+            <include name="atlassian-bamboo-api-2.2.1.jar"/>
+            <include name="atlassian-bamboo-core-2.2.1.jar"/>
+            <include name="atlassian-core-4.0.jar"/>
+            <include name="commons-logging-1.0.4.jar"/>
+            <include name="commons-logging-api-1.0.4.jar"/>
+            <include name="commons-configuration-1.4.jar"/>
+            <include name="commons-lang-2.3.jar"/>
+            <include name="jfreechart-1.0.9.jar"/>
+            <include name="atlassian-bamboo-charts-2.2.1.jar"/>
+            <include name="atlassian-bamboo-web-2.2.1.jar"/>
+        </fileset>
+        <fileset dir="src\org.spearce.jgit\lib">
+            <include name="jsch-0.1.37.jar"/>
+        </fileset>
+        <fileset dir="src\org.spearce.jgit.pgm\lib">
+            <include name="args4j-2.0.9.jar"/>
+            <include name="jsch-0.1.37.jar"/>
+        </fileset>
+    </path>
+
+    <target name="jar">
+        <mkdir dir="out"/>
+
+        <javac srcdir="src\org.spearce.jgit\src" destdir="out" classpathref="plugin.classpath"/>
+        <javac srcdir="src\org.spearce.jgit.pgm\src" destdir="out" classpathref="plugin.classpath"/>
+        <javac srcdir="src\main\java" destdir="out" classpathref="plugin.classpath"/>
+        <copy todir="out\META-INF">
+            <fileset dir="src\org.spearce.jgit.pgm\src\META-INF">
+            </fileset>
+        </copy>
+        <jar destfile="bgit.jar">
+            <fileset dir="out"></fileset>
+            <fileset dir="src\main\resources"></fileset>
+            <fileset dir="src\org.spearce.jgit.pgm\src">
+                <include name="META-INF"/>
+            </fileset>
+        </jar>
+        <!--<copyfile src="gitplugin.jar" dest="c:\Bamboo\webapp\WEB-INF\lib\gitplugin.jar"/>-->
+    </target>
+</project>

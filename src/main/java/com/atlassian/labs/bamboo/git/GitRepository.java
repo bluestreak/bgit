@@ -1,37 +1,10 @@
 package com.atlassian.labs.bamboo.git;
 
-import java.io.File;
-import java.io.IOException;
-import java.net.MalformedURLException;
-import java.net.URL;
-import java.util.ArrayList;
-import java.util.Date;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-
-import org.apache.commons.configuration.HierarchicalConfiguration;
-import org.apache.commons.lang.StringUtils;
-import org.apache.commons.lang.builder.CompareToBuilder;
-import org.apache.commons.lang.builder.EqualsBuilder;
-import org.apache.commons.lang.builder.HashCodeBuilder;
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
-
-import com.atlassian.bamboo.author.Author;
-import com.atlassian.bamboo.author.AuthorImpl;
 import com.atlassian.bamboo.commit.Commit;
 import com.atlassian.bamboo.commit.CommitFile;
-import com.atlassian.bamboo.commit.CommitFileImpl;
 import com.atlassian.bamboo.commit.CommitImpl;
-import com.atlassian.bamboo.repository.AbstractRepository;
-import com.atlassian.bamboo.repository.InitialBuildAwareRepository;
-import com.atlassian.bamboo.repository.MutableQuietPeriodAwareRepository;
-import com.atlassian.bamboo.repository.QuietPeriodHelper;
+import com.atlassian.bamboo.repository.*;
 import com.atlassian.bamboo.repository.Repository;
-import com.atlassian.bamboo.repository.RepositoryException;
-import com.atlassian.bamboo.repository.ViewCvsFileLinkGenerator;
-import com.atlassian.bamboo.repository.WebRepositoryEnabledRepository;
 import com.atlassian.bamboo.security.EncryptionException;
 import com.atlassian.bamboo.security.StringEncrypter;
 import com.atlassian.bamboo.utils.ConfigUtils;
@@ -40,349 +13,280 @@ import com.atlassian.bamboo.v2.build.BuildChanges;
 import com.atlassian.bamboo.v2.build.BuildChangesImpl;
 import com.atlassian.bamboo.v2.build.BuildContext;
 import com.atlassian.bamboo.ww2.actions.build.admin.create.BuildConfiguration;
-import com.opensymphony.util.UrlUtils;
+import com.atlassian.bamboo.author.AuthorImpl;
+import org.apache.commons.configuration.HierarchicalConfiguration;
+import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang.builder.CompareToBuilder;
+import org.apache.commons.lang.builder.EqualsBuilder;
+import org.apache.commons.lang.builder.HashCodeBuilder;
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
+import org.spearce.jgit.pgm.Main;
+import org.spearce.jgit.lib.*;
+import org.spearce.jgit.revwalk.RevWalk;
+import org.spearce.jgit.revwalk.RevCommit;
+import org.spearce.jgit.transport.Transport;
 
-import edu.nyu.cs.javagit.api.DotGit;
-import edu.nyu.cs.javagit.api.JavaGitException;
-import edu.nyu.cs.javagit.api.Ref;
-import edu.nyu.cs.javagit.api.commands.GitLog;
-import edu.nyu.cs.javagit.api.commands.GitLogOptions;
-import edu.nyu.cs.javagit.api.commands.GitLogResponse;
-import edu.nyu.cs.javagit.api.commands.GitMerge;
-import edu.nyu.cs.javagit.client.cli.CliGitClone;
-import edu.nyu.cs.javagit.client.cli.CliGitFetch;
+import java.io.File;
+import java.io.IOException;
+import java.net.MalformedURLException;
+import java.net.URL;
+import java.util.*;
+import java.util.regex.Pattern;
+import java.util.regex.Matcher;
 
-public class GitRepository extends AbstractRepository implements WebRepositoryEnabledRepository, InitialBuildAwareRepository, MutableQuietPeriodAwareRepository
-{
+public class GitRepository extends AbstractRepository implements WebRepositoryEnabledRepository, InitialBuildAwareRepository, MutableQuietPeriodAwareRepository {
+    
     private static final Log log = LogFactory.getLog(GitRepository.class);
 
-
-    // ------------------------------------------------------------------------------------------------------- Constants
     public static final String NAME = "Git";
     public static final String KEY = "git";
 
-    private static final String REPO_PREFIX = "repository.git.";
+    public static final String REPO_PREFIX = "repository.git.";
     public static final String GIT_REPO_URL = REPO_PREFIX + "repositoryUrl";
+    public static final String GIT_AUTH_TYPE = "repository.git.authType";
     public static final String GIT_USERNAME = REPO_PREFIX + "username";
     public static final String GIT_PASSWORD = REPO_PREFIX + "userPassword";
     public static final String GIT_PASSPHRASE = REPO_PREFIX + "passphrase";
     public static final String GIT_AUTHTYPE = REPO_PREFIX + "authType";
     public static final String GIT_KEYFILE = REPO_PREFIX + "keyFile";
-    public static final String GIT_REMOTE_BRANCH = REPO_PREFIX + "remoteBranch";
-
 
     private static final String USE_EXTERNALS = REPO_PREFIX + "useExternals";
-
-    private static final String AUTH_SSH = "ssh";
-    private static final String PASSWORD_AUTHENTICATION = "password";
+    private static final String EXTERNAL_PATH_MAPPINGS2 = REPO_PREFIX + "externalsToRevisionMappings";
 
     private static final String TEMPORARY_GIT_ADVANCED = "temporary.git.advanced";
-
     private static final String TEMPORARY_GIT_PASSWORD_CHANGE = "temporary.git.passwordChange";
     private static final String TEMPORARY_GIT_PASSPHRASE_CHANGE = "temporary.git.passphraseChange";
     private static final String TEMPORARY_GIT_PASSWORD = "temporary.git.password";
     private static final String TEMPORARY_GIT_PASSPHRASE = "temporary.git.passphrase";
-    private static final String GIT_AUTH_TYPE = "repository.git.authType";
 
-    private static final String EXTERNAL_PATH_MAPPINGS2 = REPO_PREFIX + "externalsToRevisionMappings";
-
-
-    // ------------------------------------------------------------------------------------------------- Type Properties
     private String repositoryUrl;
     private String webRepositoryUrl;
+    private String authType;
     private String username;
     private String password;
     private String passphrase;
     private String keyFile;
     private String webRepositoryUrlRepoName;
-    private String authType;
-    private String remoteBranch;
 
-    // Quiet Period
     private final QuietPeriodHelper quietPeriodHelper = new QuietPeriodHelper(REPO_PREFIX);
     private boolean quietPeriodEnabled = false;
     private int quietPeriod = QuietPeriodHelper.DEFAULT_QUIET_PERIOD;
     private int maxRetries = QuietPeriodHelper.DEFAULT_MAX_RETRIES;
 
-    /**
-     * Maps the path to the latest checked revision
-     */
     private Map<String, Long> externalPathRevisionMappings = new HashMap<String, Long>();
 
-    // ---------------------------------------------------------------------------------------------------- Dependencies
-
     private static final ThreadLocal<StringEncrypter> stringEncrypter = new ThreadLocal<StringEncrypter>() {
-
-        protected StringEncrypter initialValue()
-        {
+        protected StringEncrypter initialValue() {
             return new StringEncrypter();
         }
-
     };
 
-    // ---------------------------------------------------------------------------------------------------- Constructors
-
-    // -------------------------------------------------------------------------------------------------- Public Methods
-
-    public void addDefaultValues( BuildConfiguration buildConfiguration)
-    {
+    public void addDefaultValues(BuildConfiguration buildConfiguration) {
         super.addDefaultValues(buildConfiguration);
         quietPeriodHelper.addDefaultValues(buildConfiguration);
     }
 
-    
-    public synchronized BuildChanges collectChangesSinceLastBuild( String planKey,  String lastVcsRevisionKey) throws RepositoryException
-    {
-        log.error("determining if there have been changes for " + planKey + " since "+lastVcsRevisionKey);
-        try
-        {
-
-            String repositoryUrl = getSubstitutedRepositoryUrl();
-
-            File sourceDir = getCheckoutDirectory(planKey);
-
-            DotGit dotGet = fetch(sourceDir, repositoryUrl);
-            
-            final List<Commit> commits = new ArrayList<Commit>();
-
-            final String latestRevisionOnSvnServer = detectCommitsForUrl(repositoryUrl, lastVcsRevisionKey, commits, planKey);
-
-            String lastRevisionChecked = latestRevisionOnSvnServer;
-            log.error("last revision:"+lastRevisionChecked);
-
-            return new BuildChangesImpl(String.valueOf(lastRevisionChecked), commits);
-        } catch (IOException e)
-        {
-            e.printStackTrace();  //To change body of catch statement use File | Settings | File Templates.
-        } catch (JavaGitException e)
-        {
-            e.printStackTrace();  //To change body of catch statement use File | Settings | File Templates.
+    public synchronized BuildChanges collectChangesSinceLastBuild(String planKey, String lastVcsRevisionKey) throws RepositoryException {
+        log.info("Determining if there have been changes since " + lastVcsRevisionKey);
+        try {
+            String repositoryUrl = getFullRepositoryUrl();
+            File sourceDir = getSourceCodeDirectory(planKey);
+            fetch(sourceDir, repositoryUrl);
+            List<Commit> commits = new ArrayList<Commit>();
+            String lastRevisionChecked = detectCommitsForUrl(repositoryUrl, lastVcsRevisionKey, commits, planKey);
+            log.info("Doing build for latest changes till revision:" + lastRevisionChecked);
+            return new BuildChangesImpl(lastRevisionChecked, commits);
+        } catch (Exception e) {
+            log.error(e.getMessage(),e);
+            throw new RepositoryException((new StringBuilder()).append("Build '").append(planKey).append("' failed to check Git repository").toString(), e);
         }
-        return null;
     }
 
-    private DotGit fetch(File sourceDir, String repositoryUrl) throws IOException, JavaGitException
-    {
-        log.error("fetching repo");
-        DotGit dotGit = DotGit.getInstance(sourceDir);
-        if (!sourceDir.exists()) {
-            log.error("no repo found, creating");
-            CliGitClone clone = new CliGitClone();
-            clone.clone(sourceDir.getParentFile(), repositoryUrl);
-            //dotGit.init();
-            //CliGitRemote remote = new CliGitRemote();
-            //remote.remote(sourceDir, Ref.createBranchRef("origin"), repositoryUrl);
+    private void fetch(File sourceDir, String repositoryUrl) throws Exception {
+        log.info("Fetching changes from remote repository");
+        File gitDir = new File(sourceDir, ".git");
+
+        // fetch the latest changes
+        org.spearce.jgit.lib.Repository db = new org.spearce.jgit.lib.Repository(gitDir);
+        Transport transport = Transport.open(db, "origin");
+        try{
+            transport.fetch(new TextProgressMonitor(),null);
+        }finally{
+            transport.close();
+            if(db!=null){
+                db.close();
+            }
         }
-        CliGitFetch fetch = new CliGitFetch();
-        log.error("doing fetch");
-        fetch.fetch(sourceDir);
-        log.error("fetch complete");
-        return dotGit;
+
     }
 
-    private File getCheckoutDirectory(String planKey) throws RepositoryException
-    {
-        return new File(getSourceCodeDirectory(planKey), "checkout");
-    }
+    private static void forceUpdate(org.spearce.jgit.lib.Repository db,final Ref branch) throws Exception {
+        if (branch == null)
+            throw new RepositoryException("Problem in updating the source code");
 
-    /**
-     *
-     * Detects the commits for the given repositpry since the revision and HEAD for that URL
-     *
-     * @param repositoryUrl - the URL to chaeck
-     * @param lastRevisionChecked - latest revision checked for this URL. Null if never checked
-     * @param commits - the commits are added to this list
-     * @param planKey - used for debugging only
-     * @return
-     */
-    
-    private String detectCommitsForUrl( String repositoryUrl, final String lastRevisionChecked,  final List<Commit> commits,  String planKey) throws RepositoryException, IOException, JavaGitException
-    {
-        log.error("detecting commits for "+lastRevisionChecked);
-        GitLog gitLog = new GitLog();
-        GitLogOptions opt = new GitLogOptions();
-        if (lastRevisionChecked != null)
-        {
-            opt.setOptLimitCommitAfter(true, lastRevisionChecked);
-        }
-        List<GitLogResponse.Commit> gitCommits = gitLog.log(getCheckoutDirectory(planKey), opt, Ref.createBranchRef("origin/"+remoteBranch));
-        if (gitCommits.size() > 1)
-        {
-            gitCommits.remove(gitCommits.size()-1);
-            log.error("commits found:"+gitCommits.size());
-            String startRevision = gitCommits.get(gitCommits.size() - 1).getDateString();
-            String latestRevisionOnServer = gitCommits.get(0).getDateString();
-            log.info("Collecting changes for '" + planKey + "' on path '" + repositoryUrl + "' from version " + startRevision + " to " + latestRevisionOnServer);
+        final org.spearce.jgit.lib.Commit localCommit = db.mapCommit(Constants.HEAD);
+        final org.spearce.jgit.lib.Commit remoteCommit = db.mapCommit(branch.getObjectId());
 
-            for (GitLogResponse.Commit logEntry : gitCommits)
-            {
+        log.info("Merging changes from :"+remoteCommit.getCommitId().name()+" to:"+localCommit.getCommitId().name());
+
+        final RefUpdate u = db.updateRef(Constants.HEAD);
+        u.setNewObjectId(remoteCommit.getCommitId());
+        u.forceUpdate();
+
+        final GitIndex index = new GitIndex(db);
+        index.read();
+        final WorkDirCheckout co = new WorkDirCheckout(db, db.getWorkDir(), localCommit.getTree(), index, remoteCommit.getTree());
+        co.setFailOnConflict(false);
+        co.checkout();
+        index.write();
+    }    
+
+    private String detectCommitsForUrl(String repositoryUrl, final String lastRevisionChecked, final List<Commit> commits, String planKey) throws RepositoryException, IOException {
+        log.info("Detecting commits after " + lastRevisionChecked);
+
+        File gitDir = new File(getSourceCodeDirectory(planKey), ".git");
+        org.spearce.jgit.lib.Repository db = new org.spearce.jgit.lib.Repository(gitDir);
+        try{
+            RevWalk walk = new RevWalk(db);
+
+            final ObjectId fetchHead = db.getRef("refs/remotes/origin/master").getObjectId();
+            walk.markStart(walk.parseCommit(fetchHead));
+
+            for (final RevCommit revCommit : walk) {
+                if(AnyObjectId.equals(revCommit.toObjectId(),ObjectId.fromString(lastRevisionChecked))){
+                    break;
+                }
                 CommitImpl commit = new CommitImpl();
-                String authorName = logEntry.getAuthor();
-
-                // it is possible to have commits with empty committer. BAM-2945
-                if (StringUtils.isBlank(authorName))
-                {
-                    log.info("Author name is empty for " + commit.toString());
-                    authorName = Author.UNKNOWN_AUTHOR;
-                }
-                commit.setAuthor(new AuthorImpl(authorName));
-                commit.setDate(new Date(logEntry.getDateString()));
-                commit.setComment(logEntry.getMessage());
-                List<CommitFile> files = new ArrayList();
-
-                if (logEntry.getFiles() != null) {
-                    for (GitLogResponse.CommitFile file : logEntry.getFiles())
-                    {
-                        CommitFileImpl commitFile = new CommitFileImpl();
-                        commitFile.setName(file.getName());
-                        commitFile.setRevision(logEntry.getSha());
-                        files.add(commitFile);
-                    }
-                }
-                commit.setFiles(files);
-
+                commit.setAuthor(new AuthorImpl(revCommit.getAuthorIdent().getName()));
+                commit.setDate(new Date(revCommit.getCommitTime()));
+                commit.setComment(revCommit.getShortMessage());
+                //TODO ADD LIST OF FILES FOR COMMIT
                 commits.add(commit);
             }
-            return latestRevisionOnServer;
+            return fetchHead.name();
+        }finally{
+            if(db!=null){
+                db.close();
+            }
         }
-        log.error("returning last revision:"+lastRevisionChecked);
-        return lastRevisionChecked;
     }
 
-    
-    public String retrieveSourceCode( String planKey, String vcsRevisionKey) throws RepositoryException
-    {
-        log.error("retrieving source code");
-        try
-        {
-            return retreiveSourceCodeWithException(planKey, vcsRevisionKey);
-        } catch (IOException e)
-        {
-            e.printStackTrace();  //To change body of catch statement use File | Settings | File Templates.
-        } catch (JavaGitException e)
-        {
-            e.printStackTrace();  //To change body of catch statement use File | Settings | File Templates.
+
+    public String retrieveSourceCode(String planKey, String vcsRevisionKey) throws RepositoryException {
+        log.info("Retrieving the latest source code");
+        try {
+            String lastUpdated = retreiveSourceCodeWithException(planKey, vcsRevisionKey);
+            log.info("Code updated till revision:"+lastUpdated);
+            return lastUpdated;
+        } catch (Exception e) {
+            e.printStackTrace();
+            throw new RepositoryException("Problem in retrieving the latest source code.",e);
         }
-        return null;
     }
 
-    String retreiveSourceCodeWithException(String planKey, String vcsRevisionKey) throws RepositoryException, IOException, JavaGitException
-    {
-        String repositoryUrl = getSubstitutedRepositoryUrl();
+    private String retreiveSourceCodeWithException(String planKey, String vcsRevisionKey) throws Exception {
+        String repositoryUrl = getFullRepositoryUrl();
+        File sourceDir = getSourceCodeDirectory(planKey);
+        File gitDir = new File(sourceDir, ".git");
 
-        File sourceDir = getCheckoutDirectory(planKey);
-
-        fetch(sourceDir, repositoryUrl);
-        log.error("doing merge");
-        GitMerge merge = new GitMerge();
-
-        // FIXME: should really only merge to the target revision
-        merge.merge(sourceDir, Ref.createBranchRef("origin/"+remoteBranch));
-
-        return detectCommitsForUrl(repositoryUrl, vcsRevisionKey, new ArrayList<Commit>(), planKey);
+        org.spearce.jgit.lib.Repository db = null;
+        try{
+            if (!sourceDir.exists() || !gitDir.exists()) {
+                log.error("No Repository found, creating the repository");
+                Main main = new Main();
+                main.execute(new String[]{"clone", repositoryUrl , sourceDir.toString()});
+                db = new org.spearce.jgit.lib.Repository(gitDir);
+            } else {
+                db = new org.spearce.jgit.lib.Repository(gitDir);
+                forceUpdate(db,db.getRef("refs/remotes/origin/master"));
+            }
+            return db.getRef(Constants.HEAD).getObjectId().name();
+        }finally {
+            if(db!=null){
+                db.close();
+            }
+        }
     }
 
-
-    
-    public ErrorCollection validate( BuildConfiguration buildConfiguration)
-    {
+    public ErrorCollection validate(BuildConfiguration buildConfiguration) {
         ErrorCollection errorCollection = super.validate(buildConfiguration);
 
         String repoUrl = buildConfiguration.getString(GIT_REPO_URL);
-        repoUrl = variableSubstitutionBean.substituteBambooVariables(repoUrl);
-        if (StringUtils.isEmpty(repoUrl))
-        {
+        if (StringUtils.isEmpty(repoUrl)) {
             errorCollection.addError(GIT_REPO_URL, "Please specify the build's Git Repository");
+        } else {
+            Matcher matcher = Pattern.compile("^([^:]+?):?(?::(\\d+))?((?:[A-Za-z]:)?/.+)$").matcher(repoUrl);
+            if(!matcher.matches()){
+                errorCollection.addError(GIT_REPO_URL, "Please enter valid repository URL. Format: host:port/git-repo Example: 10.0.0.128:22/git-repo/project (22 default SSH port)");
+            }
         }
-        else
-        {
-            // FIXME: do validation
-        }
-        
-        String remoBranch = buildConfiguration.getString(GIT_REMOTE_BRANCH);
-        if (StringUtils.isEmpty(remoBranch))
-        {
-            errorCollection.addError(GIT_REMOTE_BRANCH, "Please specify the remote branch that will be checked out");
+
+        String authenticationType = buildConfiguration.getString(GIT_AUTH_TYPE);
+        if(authenticationType.equals(AuthenticationType.SSH.getKey())){
+            errorCollection.addError(GIT_AUTH_TYPE, "SSH Authentication is not yet supported with GIT repository.");
         }
 
         String webRepoUrl = buildConfiguration.getString(WEB_REPO_URL);
-        if (!StringUtils.isEmpty(webRepoUrl) && !UrlUtils.verifyHierachicalURI(webRepoUrl))
-        {
-            errorCollection.addError(WEB_REPO_URL, "This is not a valid url");
-        }
+//        if (!StringUtils.isEmpty(webRepoUrl) && !UrlUtils.verifyHierachicalURI(webRepoUrl)) {
+//            errorCollection.addError(WEB_REPO_URL, "This is not a valid url");
+//        }
 
         quietPeriodHelper.validate(buildConfiguration, errorCollection);
-        log.error("validation results:"+errorCollection);
+        log.debug("Validation results:" + errorCollection);
         return errorCollection;
     }
 
 
-    public boolean isRepositoryDifferent( Repository repository)
-    {
-        if (repository != null && repository instanceof GitRepository)
-        {
-            GitRepository svn = (GitRepository) repository;
+    public boolean isRepositoryDifferent(Repository repository) {
+        if (repository != null && repository instanceof GitRepository) {
+            GitRepository gitRepository = (GitRepository) repository;
             return !new EqualsBuilder()
-                    .append(this.getName(), svn.getName())
-                    .append(getRepositoryUrl(), svn.getRepositoryUrl())
+                    .append(this.getName(), gitRepository.getName())
+                    .append(getRepositoryUrl(), gitRepository.getRepositoryUrl())
                     .isEquals();
-        }
-        else
-        {
+        } else {
             return true;
         }
     }
 
-    public void prepareConfigObject( BuildConfiguration buildConfiguration)
-    {
+    public void prepareConfigObject(BuildConfiguration buildConfiguration) {
         String repositoryKey = buildConfiguration.getString(SELECTED_REPOSITORY);
-
         String authType = buildConfiguration.getString(GIT_AUTH_TYPE);
-        if (PASSWORD_AUTHENTICATION.equals(authType))
-        {
+        
+        if (AuthenticationType.PASSWORD.getKey().equals(authType)) {
             boolean svnPasswordChanged = buildConfiguration.getBoolean(TEMPORARY_GIT_PASSWORD_CHANGE);
-            if (svnPasswordChanged)
-            {
+            if (svnPasswordChanged) {
                 String newPassword = buildConfiguration.getString(TEMPORARY_GIT_PASSWORD);
-                if (getKey().equals(repositoryKey))
-                {
+                if (getKey().equals(repositoryKey)) {
                     buildConfiguration.setProperty(GitRepository.GIT_PASSWORD, stringEncrypter.get().encrypt(newPassword));
                 }
             }
-        }
-        else
-        {
+        } else {
             boolean passphraseChanged = buildConfiguration.getBoolean(TEMPORARY_GIT_PASSPHRASE_CHANGE);
-            if (passphraseChanged)
-            {
+            if (passphraseChanged) {
                 String newPassphrase = buildConfiguration.getString(TEMPORARY_GIT_PASSPHRASE);
                 buildConfiguration.setProperty(GitRepository.GIT_PASSPHRASE, stringEncrypter.get().encrypt(newPassphrase));
             }
         }
 
         // Disabling advanced will clear all advanced
-        if (!buildConfiguration.getBoolean(TEMPORARY_GIT_ADVANCED, false))
-        {
+        if (!buildConfiguration.getBoolean(TEMPORARY_GIT_ADVANCED, false)) {
             quietPeriodHelper.clearFromBuildConfiguration(buildConfiguration);
             buildConfiguration.clearTree(USE_EXTERNALS);
         }
     }
 
-    public void populateFromConfig( HierarchicalConfiguration config)
-    {
+    public void populateFromConfig(HierarchicalConfiguration config) {
         super.populateFromConfig(config);
 
         setRepositoryUrl(config.getString(GIT_REPO_URL));
         setUsername(config.getString(GIT_USERNAME));
-        setRemoteBranch(config.getString(GIT_REMOTE_BRANCH));
         setAuthType(config.getString(GIT_AUTHTYPE));
-        if (AUTH_SSH.equals(authType))
-        {
+        if (AuthenticationType.SSH.getKey().equals(authType)) {
             setEncryptedPassphrase(config.getString(GIT_PASSPHRASE));
             setKeyFile(config.getString(GIT_KEYFILE));
-        }
-        else
-        {
+        } else {
             setEncryptedPassword(config.getString(GIT_PASSWORD));
         }
         setWebRepositoryUrl(config.getString(WEB_REPO_URL));
@@ -394,21 +298,16 @@ public class GitRepository extends AbstractRepository implements WebRepositoryEn
         quietPeriodHelper.populateFromConfig(config, this);
     }
 
-    
-    public HierarchicalConfiguration toConfiguration()
-    {
+
+    public HierarchicalConfiguration toConfiguration() {
         HierarchicalConfiguration configuration = super.toConfiguration();
         configuration.setProperty(GIT_REPO_URL, getRepositoryUrl());
-        configuration.setProperty(GIT_REMOTE_BRANCH, getRemoteBranch());
         configuration.setProperty(GIT_USERNAME, getUsername());
         configuration.setProperty(GIT_AUTHTYPE, getAuthType());
-        if (AUTH_SSH.equals(authType))
-        {
+        if (AuthenticationType.SSH.getKey().equals(authType)) {
             configuration.setProperty(GIT_PASSPHRASE, getEncryptedPassphrase());
             configuration.setProperty(GIT_KEYFILE, getKeyFile());
-        }
-        else
-        {
+        } else {
             configuration.setProperty(GIT_PASSWORD, getEncryptedPassword());
         }
         configuration.setProperty(WEB_REPO_URL, getWebRepositoryUrl());
@@ -417,334 +316,209 @@ public class GitRepository extends AbstractRepository implements WebRepositoryEn
         final Map<String, String> stringMap = ConfigUtils.toStringMap(externalPathRevisionMappings);
         ConfigUtils.addMapToBuilConfiguration(EXTERNAL_PATH_MAPPINGS2, stringMap, configuration);
 
-        // Quiet period
         quietPeriodHelper.toConfiguration(configuration, this);
         return configuration;
     }
 
-    public void onInitialBuild(BuildContext buildContext)
-    {
+    public void onInitialBuild(BuildContext buildContext) {
     }
 
-
-    public boolean isAdvancedOptionEnabled( BuildConfiguration buildConfiguration)
-    {
+    public boolean isAdvancedOptionEnabled(BuildConfiguration buildConfiguration) {
         final boolean useExternals = buildConfiguration.getBoolean(USE_EXTERNALS, false);
         final boolean quietPeriodEnabled = quietPeriodHelper.isEnabled(buildConfiguration);
         return useExternals || quietPeriodEnabled;
     }
 
-    // -------------------------------------------------------------------------------------- Basic accessors & mutators
-    /**
-     * What's the name of the plugin - appears in the GUI dropdown
-     *
-     * @return The name
-     */
-    
-    public String getName()
-    {
+    public String getName() {
         return NAME;
     }
 
-    public String getPassphrase()
-    {
-        try
-        {
-            StringEncrypter stringEncrypter = new StringEncrypter();
-            return stringEncrypter.decrypt(passphrase);
+    public String getPassphrase() {
+        try {
+            return new StringEncrypter().decrypt(passphrase);
         }
-        catch (Exception e)
-        {
-            return null;
+        catch (Exception e) {
+            log.error(e);            
         }
+        return null;
     }
 
-    public void setPassphrase(String passphrase)
-    {
-        try
-        {
-            if (StringUtils.isNotEmpty(passphrase))
-            {
-                StringEncrypter stringEncrypter = new StringEncrypter();
-                this.passphrase = stringEncrypter.encrypt(passphrase);
-            }
-            else
-            {
+    public void setPassphrase(String passphrase) {
+        try {
+            if (StringUtils.isNotEmpty(passphrase)) {
+                this.passphrase = new StringEncrypter().encrypt(passphrase);
+            } else {
                 this.passphrase = passphrase;
             }
         }
-        catch (EncryptionException e)
-        {
+        catch (EncryptionException e) {
             log.error("Failed to encrypt password", e);
             this.passphrase = null;
         }
     }
 
-    public String getEncryptedPassphrase()
-    {
+    public String getEncryptedPassphrase() {
         return passphrase;
     }
 
-    public void setEncryptedPassphrase(String encryptedPassphrase)
-    {
+    public void setEncryptedPassphrase(String encryptedPassphrase) {
         passphrase = encryptedPassphrase;
     }
 
-    public String getKeyFile()
-    {
+    public String getKeyFile() {
         return keyFile;
     }
 
-    public void setKeyFile(String myKeyFile)
-    {
+    public void setKeyFile(String myKeyFile) {
         this.keyFile = myKeyFile;
     }
 
-    public String getAuthType()
-    {
+    public String getAuthType() {
         return authType;
     }
 
-    public void setAuthType(String authType)
-    {
+    public void setAuthType(String authType) {
         this.authType = authType;
     }
 
-    /**
-     * Where is the documentation and help about using Subversion?
-     *
-     * @return The web url
-     */
-    public String getUrl()
-    {
-        return "http://subversion.tigris.org/";
+    // Where is the documentation and help about using Git?
+    public String getUrl() {
+        return "http://git-scm.com/";
     }
 
-    /**
-     * Specify the subversion repository we are using
-     *
-     * @param repositoryUrl The subversion repository
-     */
-    public void setRepositoryUrl(String repositoryUrl)
-    {
+    public void setRepositoryUrl(String repositoryUrl) {
         this.repositoryUrl = StringUtils.trim(repositoryUrl);
     }
 
-    /**
-     * Which repository URL are we using?
-     *
-     * @return The subversion repository
-     */
-    public String getRepositoryUrl()
-    {
+    public String getRepositoryUrl() {
         return repositoryUrl;
     }
-    
-    /**
-     * Specify the subversion repository we are using
-     *
-     * @param remoteBranch The subversion repository
-     */
-    public void setRemoteBranch(String remoteBranch)
-    {
-        this.remoteBranch = StringUtils.trim(remoteBranch);
+
+    public String getFullRepositoryUrl() {
+        if(getUsername()!=null){
+            return "ssh://"+getUsername()+":"+(getUserPassword()!=null?getUserPassword():"")+"@"+repositoryUrl;
+        }else{
+            return "ssh://"+repositoryUrl;
+        }
     }
 
-    /**
-     * Which repository URL are we using?
-     *
-     * @return The subversion repository
-     */
-    public String getRemoteBranch()
-    {
-        return remoteBranch;
-    }
-
-
-    public String getSubstitutedRepositoryUrl()
-    {
-        return variableSubstitutionBean.substituteBambooVariables(repositoryUrl);
-    }
-
-    /**
-     * What's the username (if any) we are using to acces the repository?
-     *
-     * @param username The user name, null if there is no user
-     */
-    public void setUsername(String username)
-    {
+    public void setUsername(String username) {
         this.username = StringUtils.trim(username);
     }
 
-    /**
-     * What username are we using to access the repository?
-     *
-     * @return The username, null if we are not using user authentication
-     */
-    public String getUsername()
-    {
+    public String getUsername() {
         return username;
     }
 
-    /**
-     * Specify the password required to access the resposotory
-     *
-     * @param password The password (null if we are not using user authentication)
-     */
-    public void setUserPassword(String password)
-    {
-        try
-        {
-            if (StringUtils.isNotEmpty(password))
-            {
-                StringEncrypter stringEncrypter = new StringEncrypter();
-                this.password = stringEncrypter.encrypt(password);
-            }
-            else
-            {
+    public void setUserPassword(String password) {
+        try {
+            if (StringUtils.isNotEmpty(password)) {
+                this.password = new StringEncrypter().encrypt(password);
+            } else {
                 this.password = password;
             }
         }
-        catch (EncryptionException e)
-        {
+        catch (EncryptionException e) {
             log.error("Failed to encrypt password", e);
             this.password = null;
         }
     }
 
-    /**
-     * What password are we using to access the repository
-     *
-     * @return The password (null if we are not using user authentication)
-     */
-    public String getUserPassword()
-    {
-        try
-        {
-            StringEncrypter stringEncrypter = new StringEncrypter();
-            return stringEncrypter.decrypt(password);
+    public String getUserPassword() {
+        try {
+            return new StringEncrypter().decrypt(password);
         }
-        catch (Exception e)
-        {
+        catch (Exception e) {
             return null;
         }
     }
 
-
-    public String getEncryptedPassword()
-    {
+    public String getEncryptedPassword() {
         return password;
     }
 
-    public void setEncryptedPassword(String encryptedPassword)
-    {
+    public void setEncryptedPassword(String encryptedPassword) {
         password = encryptedPassword;
     }
 
-
-    public boolean hasWebBasedRepositoryAccess()
-    {
+    public boolean hasWebBasedRepositoryAccess() {
         return StringUtils.isNotBlank(webRepositoryUrl);
     }
 
-    public String getWebRepositoryUrl()
-    {
+    public String getWebRepositoryUrl() {
         return webRepositoryUrl;
     }
 
-    public void setWebRepositoryUrl(String url)
-    {
+    public void setWebRepositoryUrl(String url) {
         webRepositoryUrl = StringUtils.trim(url);
     }
 
-    public String getWebRepositoryUrlRepoName()
-    {
+    public String getWebRepositoryUrlRepoName() {
         return webRepositoryUrlRepoName;
     }
 
-    public void setWebRepositoryUrlRepoName(String repoName)
-    {
+    public void setWebRepositoryUrlRepoName(String repoName) {
         webRepositoryUrlRepoName = StringUtils.trim(repoName);
     }
 
-    public String getWebRepositoryUrlForFile(CommitFile file)
-    {
-        ViewCvsFileLinkGenerator fileLinkGenerator = new ViewCvsFileLinkGenerator(webRepositoryUrl);
+    public String getWebRepositoryUrlForFile(CommitFile file) {
+//        ViewCvsFileLinkGenerator fileLinkGenerator = new ViewCvsFileLinkGenerator(webRepositoryUrl);
         return null;//fileLinkGenerator.getWebRepositoryUrlForFile(file, webRepositoryUrlRepoName, ViewCvsFileLinkGenerator.GIT_REPO_TYPE);
     }
 
-    public String getWebRepositoryUrlForDiff(CommitFile file)
-    {
-        ViewCvsFileLinkGenerator fileLinkGenerator = new ViewCvsFileLinkGenerator(webRepositoryUrl);
+    public String getWebRepositoryUrlForDiff(CommitFile file) {
+//        ViewCvsFileLinkGenerator fileLinkGenerator = new ViewCvsFileLinkGenerator(webRepositoryUrl);
         return null;// fileLinkGenerator.getWebRepositoryUrlForDiff(file, webRepositoryUrlRepoName, ViewCvsFileLinkGenerator.GIT_REPO_TYPE);
     }
 
-    public String getWebRepositoryUrlForRevision(CommitFile file)
-    {
-        ViewCvsFileLinkGenerator fileLinkGenerator = new ViewCvsFileLinkGenerator(webRepositoryUrl);
+    public String getWebRepositoryUrlForRevision(CommitFile file) {
+//        ViewCvsFileLinkGenerator fileLinkGenerator = new ViewCvsFileLinkGenerator(webRepositoryUrl);
         return null;// fileLinkGenerator.getWebRepositoryUrlForRevision(file, webRepositoryUrlRepoName, ViewCvsFileLinkGenerator.GIT_REPO_TYPE);
     }
 
     @Override
-    
-    public String getWebRepositoryUrlForCommit( Commit commit)
-    {
-        ViewCvsFileLinkGenerator fileLinkGenerator = new ViewCvsFileLinkGenerator(webRepositoryUrl);
+    public String getWebRepositoryUrlForCommit(Commit commit) {
+//        ViewCvsFileLinkGenerator fileLinkGenerator = new ViewCvsFileLinkGenerator(webRepositoryUrl);
         return null;// fileLinkGenerator.getWebRepositoryUrlForCommit(commit, webRepositoryUrlRepoName, ViewCvsFileLinkGenerator.GIT_REPO_TYPE);
     }
 
-    public String getHost()
-    {
-    	return "localhost"; 
-    	// with the code below bamboo says UNKNOWN_HOST and I can't use remote triggers (slnc) 
-    	
-//        if (repositoryUrl == null)
-//        {
-//            return UNKNOWN_HOST;
-//        }
-//
-//        try
-//        {
-//            URL url = new URL(getSubstitutedRepositoryUrl());
-//            return url.getHost();
-//        } catch (MalformedURLException e)
-//        {
-//            return UNKNOWN_HOST;
-//        }
+    public String getHost() {
+        if (repositoryUrl == null) {
+            return UNKNOWN_HOST;
+        }
+        try {
+            URL url = new URL(getFullRepositoryUrl());
+            return url.getHost();
+        } catch (MalformedURLException e) {
+            return UNKNOWN_HOST;
+        }
     }
 
-    public boolean isQuietPeriodEnabled()
-    {
+    public boolean isQuietPeriodEnabled() {
         return quietPeriodEnabled;
     }
 
-    public void setQuietPeriodEnabled(boolean quietPeriodEnabled)
-    {
+    public void setQuietPeriodEnabled(boolean quietPeriodEnabled) {
         this.quietPeriodEnabled = quietPeriodEnabled;
     }
 
-    public int getQuietPeriod()
-    {
+    public int getQuietPeriod() {
         return quietPeriod;
     }
 
-    public void setQuietPeriod(int quietPeriod)
-    {
+    public void setQuietPeriod(int quietPeriod) {
         this.quietPeriod = quietPeriod;
     }
 
-    public int getMaxRetries()
-    {
+    public int getMaxRetries() {
         return maxRetries;
     }
 
-    public void setMaxRetries(int maxRetries)
-    {
+    public void setMaxRetries(int maxRetries) {
         this.maxRetries = maxRetries;
     }
 
-    public int hashCode()
-    {
+    public int hashCode() {
         return new HashCodeBuilder(101, 11)
                 .append(getKey())
                 .append(getRepositoryUrl())
@@ -756,10 +530,8 @@ public class GitRepository extends AbstractRepository implements WebRepositoryEn
                 .toHashCode();
     }
 
-    public boolean equals(Object o)
-    {
-        if (!(o instanceof GitRepository))
-        {
+    public boolean equals(Object o) {
+        if (!(o instanceof GitRepository)) {
             return false;
         }
         GitRepository rhs = (GitRepository) o;
@@ -773,8 +545,7 @@ public class GitRepository extends AbstractRepository implements WebRepositoryEn
                 .isEquals();
     }
 
-    public int compareTo(Object obj)
-    {
+    public int compareTo(Object obj) {
         GitRepository o = (GitRepository) obj;
         return new CompareToBuilder()
                 .append(getRepositoryUrl(), o.getRepositoryUrl())
@@ -784,6 +555,13 @@ public class GitRepository extends AbstractRepository implements WebRepositoryEn
                 .append(getWebRepositoryUrlRepoName(), o.getWebRepositoryUrlRepoName())
                 .append(getTriggerIpAddress(), o.getTriggerIpAddress())
                 .toComparison();
+    }
+
+    public List getAuthenticationTypes() {
+        List<NameValuePair> types = new ArrayList<NameValuePair>();
+        types.add(AuthenticationType.PASSWORD.getNameValue());
+        types.add(AuthenticationType.SSH.getNameValue());
+        return types;
     }
 
 

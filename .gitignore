@@ -5,3 +5,5 @@
 target
 *.log
 bin
+out
+bgit.jar

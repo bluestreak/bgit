@@ -1,10 +1,15 @@
 [@ww.textfield labelKey='Repository' name='repository.git.repositoryUrl' required='true' /]
-[@ww.textfield labelKey='Username' name='repository.git.username' /]
-[@ww.textfield labelKey='Remote branch to track' name='repository.git.remoteBranch' required='true' /]
 
-[@ww.select labelKey='Authentication' name='repository.git.authType' toggle='true'
-        list='authenticationTypes' listKey='name' listValue='label']
+[@ww.select
+    labelKey='repository.git.authentication'
+    name='repository.git.authType'
+    toggle='true'
+    list=repository.authenticationTypes
+    listKey='name'
+    listValue='label']
 [/@ww.select]
+
+[@ww.textfield labelKey='Username' name='repository.git.username' /]
 
 [@ui.bambooSection dependsOn='repository.git.authType' showOn='password']
     [#if buildConfiguration.getString('repository.git.userPassword')?has_content]
