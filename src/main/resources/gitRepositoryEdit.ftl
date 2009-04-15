@@ -1,5 +1,7 @@
 [@ww.textfield labelKey='Repository' name='repository.git.repositoryUrl' required='true' /]
 
+[@ww.textfield labelKey='Remote branch to track' name='repository.git.remoteBranch' /]
+
 [@ww.select
     labelKey='repository.git.authentication'
     name='repository.git.authType'

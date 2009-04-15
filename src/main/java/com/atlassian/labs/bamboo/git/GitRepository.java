@@ -25,7 +25,7 @@ import org.spearce.jgit.pgm.Main;
 import org.spearce.jgit.lib.*;
 import org.spearce.jgit.revwalk.RevWalk;
 import org.spearce.jgit.revwalk.RevCommit;
-import org.spearce.jgit.transport.Transport;
+import org.spearce.jgit.transport.*;
 
 import java.io.File;
 import java.io.IOException;
@@ -44,6 +44,7 @@ public class GitRepository extends AbstractRepository implements WebRepositoryEn
 
     public static final String REPO_PREFIX = "repository.git.";
     public static final String GIT_REPO_URL = REPO_PREFIX + "repositoryUrl";
+    public static final String GIT_REMOTE_BRANCH = REPO_PREFIX + "remoteBranch";
     public static final String GIT_AUTH_TYPE = "repository.git.authType";
     public static final String GIT_USERNAME = REPO_PREFIX + "username";
     public static final String GIT_PASSWORD = REPO_PREFIX + "userPassword";
@@ -68,6 +69,7 @@ public class GitRepository extends AbstractRepository implements WebRepositoryEn
     private String passphrase;
     private String keyFile;
     private String webRepositoryUrlRepoName;
+    private String remoteBranch;
 
     private final QuietPeriodHelper quietPeriodHelper = new QuietPeriodHelper(REPO_PREFIX);
     private boolean quietPeriodEnabled = false;
@@ -89,36 +91,36 @@ public class GitRepository extends AbstractRepository implements WebRepositoryEn
 
     public synchronized BuildChanges collectChangesSinceLastBuild(String planKey, String lastVcsRevisionKey) throws RepositoryException {
         log.info("Determining if there have been changes since " + lastVcsRevisionKey);
+        String repositoryUrl = getFullRepositoryUrl();
+        File gitDir = new File(getSourceCodeDirectory(planKey), ".git");
+        org.spearce.jgit.lib.Repository db = null;
         try {
-            String repositoryUrl = getFullRepositoryUrl();
-            File sourceDir = getSourceCodeDirectory(planKey);
-            fetch(sourceDir, repositoryUrl);
+            db = new org.spearce.jgit.lib.Repository(gitDir);
+            fetch(db);
             List<Commit> commits = new ArrayList<Commit>();
-            String lastRevisionChecked = detectCommitsForUrl(repositoryUrl, lastVcsRevisionKey, commits, planKey);
+            String lastRevisionChecked = detectCommitsForUrl(lastVcsRevisionKey, commits, planKey);
             log.info("Doing build for latest changes till revision:" + lastRevisionChecked);
             return new BuildChangesImpl(lastRevisionChecked, commits);
         } catch (Exception e) {
             log.error(e.getMessage(),e);
             throw new RepositoryException((new StringBuilder()).append("Build '").append(planKey).append("' failed to check Git repository").toString(), e);
-        }
-    }
-
-    private void fetch(File sourceDir, String repositoryUrl) throws Exception {
-        log.info("Fetching changes from remote repository");
-        File gitDir = new File(sourceDir, ".git");
-
-        // fetch the latest changes
-        org.spearce.jgit.lib.Repository db = new org.spearce.jgit.lib.Repository(gitDir);
-        Transport transport = Transport.open(db, "origin");
-        try{
-            transport.fetch(new TextProgressMonitor(),null);
         }finally{
-            transport.close();
             if(db!=null){
                 db.close();
             }
         }
+    }
 
+    private FetchResult fetch(org.spearce.jgit.lib.Repository db) throws Exception {
+        log.info("Fetching changes from remote repository");
+        Transport transport = Transport.open(db, "origin");
+        FetchResult result = null;
+        try{
+            result = transport.fetch(new TextProgressMonitor(),null);
+        }finally{
+            transport.close();
+        }
+        return result;
     }
 
     private static void forceUpdate(org.spearce.jgit.lib.Repository db,final Ref branch) throws Exception {
@@ -128,7 +130,11 @@ public class GitRepository extends AbstractRepository implements WebRepositoryEn
         final org.spearce.jgit.lib.Commit localCommit = db.mapCommit(Constants.HEAD);
         final org.spearce.jgit.lib.Commit remoteCommit = db.mapCommit(branch.getObjectId());
 
-        log.info("Merging changes from :"+remoteCommit.getCommitId().name()+" to:"+localCommit.getCommitId().name());
+        if(localCommit != null){
+            log.info("Merging changes from :"+remoteCommit.getCommitId().name()+" to:"+localCommit.getCommitId().name());
+        } else {
+            log.info("Getting source code till commit :"+remoteCommit.getCommitId().name());
+        }
 
         final RefUpdate u = db.updateRef(Constants.HEAD);
         u.setNewObjectId(remoteCommit.getCommitId());
@@ -136,13 +142,18 @@ public class GitRepository extends AbstractRepository implements WebRepositoryEn
 
         final GitIndex index = new GitIndex(db);
         index.read();
-        final WorkDirCheckout co = new WorkDirCheckout(db, db.getWorkDir(), localCommit.getTree(), index, remoteCommit.getTree());
+        WorkDirCheckout co = null;
+        if(localCommit!=null){
+            co = new WorkDirCheckout(db, db.getWorkDir(), localCommit.getTree(), index, remoteCommit.getTree());
+        } else {
+            co = new WorkDirCheckout(db, db.getWorkDir(), index, remoteCommit.getTree());             
+        }
         co.setFailOnConflict(false);
         co.checkout();
         index.write();
     }    
 
-    private String detectCommitsForUrl(String repositoryUrl, final String lastRevisionChecked, final List<Commit> commits, String planKey) throws RepositoryException, IOException {
+    private String detectCommitsForUrl(final String lastRevisionChecked, final List<Commit> commits, String planKey) throws RepositoryException, IOException {
         log.info("Detecting commits after " + lastRevisionChecked);
 
         File gitDir = new File(getSourceCodeDirectory(planKey), ".git");
@@ -150,7 +161,7 @@ public class GitRepository extends AbstractRepository implements WebRepositoryEn
         try{
             RevWalk walk = new RevWalk(db);
 
-            final ObjectId fetchHead = db.getRef("refs/remotes/origin/master").getObjectId();
+            final ObjectId fetchHead = db.getRef(getRemoteBranchRef()).getObjectId();
             walk.markStart(walk.parseCommit(fetchHead));
 
             for (final RevCommit revCommit : walk) {
@@ -194,12 +205,41 @@ public class GitRepository extends AbstractRepository implements WebRepositoryEn
         try{
             if (!sourceDir.exists() || !gitDir.exists()) {
                 log.error("No Repository found, creating the repository");
-                Main main = new Main();
-                main.execute(new String[]{"clone", repositoryUrl , sourceDir.toString()});
+
                 db = new org.spearce.jgit.lib.Repository(gitDir);
+                db.create();
+                db.getConfig().setBoolean("core", null, "bare", false);
+                db.getConfig().save();
+
+                log.info("Initialized empty Git repository in " + gitDir.getAbsolutePath());
+
+                final RemoteConfig rc = new RemoteConfig(db.getConfig(), "origin");
+                rc.addURI(new URIish(repositoryUrl));
+                rc.addFetchRefSpec(new RefSpec().setForceUpdate(true)
+                        .setSourceDestination(Constants.R_HEADS + "*", Constants.R_REMOTES + "origin" + "/*"));
+                rc.update(db.getConfig());
+                db.getConfig().save();
+                FetchResult fetchResult = fetch(db);
+
+                Ref branch = null;
+                for (final Ref ref : fetchResult.getAdvertisedRefs()) {
+                    final String n = ref.getName();
+                    if(n.equals(getLocalBranchRef())){
+                        branch = ref;
+                        break;
+                    }
+                }
+
+                if(branch==null){
+                    log.error("Branch specified does not exist on remote repository");
+                    throw new RepositoryException("Branch specified does not exist on remote repository");
+                }
+
+                db.writeSymref(Constants.HEAD, branch.getName());
+                forceUpdate(db,branch);
             } else {
                 db = new org.spearce.jgit.lib.Repository(gitDir);
-                forceUpdate(db,db.getRef("refs/remotes/origin/master"));
+                forceUpdate(db,db.getRef(getRemoteBranchRef()));
             }
             return db.getRef(Constants.HEAD).getObjectId().name();
         }finally {
@@ -255,8 +295,8 @@ public class GitRepository extends AbstractRepository implements WebRepositoryEn
         String authType = buildConfiguration.getString(GIT_AUTH_TYPE);
         
         if (AuthenticationType.PASSWORD.getKey().equals(authType)) {
-            boolean svnPasswordChanged = buildConfiguration.getBoolean(TEMPORARY_GIT_PASSWORD_CHANGE);
-            if (svnPasswordChanged) {
+            boolean passwordChanged = buildConfiguration.getBoolean(TEMPORARY_GIT_PASSWORD_CHANGE);
+            if (passwordChanged) {
                 String newPassword = buildConfiguration.getString(TEMPORARY_GIT_PASSWORD);
                 if (getKey().equals(repositoryKey)) {
                     buildConfiguration.setProperty(GitRepository.GIT_PASSWORD, stringEncrypter.get().encrypt(newPassword));
@@ -281,6 +321,7 @@ public class GitRepository extends AbstractRepository implements WebRepositoryEn
         super.populateFromConfig(config);
 
         setRepositoryUrl(config.getString(GIT_REPO_URL));
+        setRemoteBranch(config.getString(GIT_REMOTE_BRANCH));
         setUsername(config.getString(GIT_USERNAME));
         setAuthType(config.getString(GIT_AUTHTYPE));
         if (AuthenticationType.SSH.getKey().equals(authType)) {
@@ -302,6 +343,7 @@ public class GitRepository extends AbstractRepository implements WebRepositoryEn
     public HierarchicalConfiguration toConfiguration() {
         HierarchicalConfiguration configuration = super.toConfiguration();
         configuration.setProperty(GIT_REPO_URL, getRepositoryUrl());
+        configuration.setProperty(GIT_REMOTE_BRANCH, getRemoteBranch());
         configuration.setProperty(GIT_USERNAME, getUsername());
         configuration.setProperty(GIT_AUTHTYPE, getAuthType());
         if (AuthenticationType.SSH.getKey().equals(authType)) {
@@ -400,6 +442,22 @@ public class GitRepository extends AbstractRepository implements WebRepositoryEn
         }else{
             return "ssh://"+repositoryUrl;
         }
+    }
+
+    public void setRemoteBranch(String remoteBranch){
+        this.remoteBranch = StringUtils.trim(remoteBranch);
+    }
+
+    public String getRemoteBranch(){
+        return remoteBranch;
+    }
+
+    public String getRemoteBranchRef(){
+        return "refs/remotes/origin/"+ (StringUtils.isEmpty(remoteBranch) ? "master" : remoteBranch);
+    }
+
+    public String getLocalBranchRef(){
+        return "refs/heads/"+ (StringUtils.isEmpty(remoteBranch) ? "master" : remoteBranch);
     }
 
     public void setUsername(String username) {
