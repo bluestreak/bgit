@@ -31,6 +31,7 @@ import java.io.File;
 import java.io.IOException;
 import java.net.MalformedURLException;
 import java.net.URL;
+import java.net.URISyntaxException;
 import java.util.*;
 import java.util.regex.Pattern;
 import java.util.regex.Matcher;
@@ -91,7 +92,6 @@ public class GitRepository extends AbstractRepository implements WebRepositoryEn
 
     public synchronized BuildChanges collectChangesSinceLastBuild(String planKey, String lastVcsRevisionKey) throws RepositoryException {
         log.info("Determining if there have been changes since " + lastVcsRevisionKey);
-        String repositoryUrl = getFullRepositoryUrl();
         File gitDir = new File(getSourceCodeDirectory(planKey), ".git");
         org.spearce.jgit.lib.Repository db = null;
         try {
@@ -258,7 +258,7 @@ public class GitRepository extends AbstractRepository implements WebRepositoryEn
         } else {
             Matcher matcher = Pattern.compile("^([^:]+?):?(?::(\\d+))?((?:[A-Za-z]:)?/.+)$").matcher(repoUrl);
             if(!matcher.matches()){
-                errorCollection.addError(GIT_REPO_URL, "Please enter valid repository URL. Format: host:port/git-repo Example: 10.0.0.128:22/git-repo/project (22 default SSH port)");
+                errorCollection.addError(GIT_REPO_URL, "Please enter valid repository URL. Format: protocol://host:port/git-repo Example: ssh://10.0.0.128:22/git-repo/project (22 default SSH port)");
             }
         }
 
@@ -436,12 +436,20 @@ public class GitRepository extends AbstractRepository implements WebRepositoryEn
         return repositoryUrl;
     }
 
-    public String getFullRepositoryUrl() {
-        if(getUsername()!=null){
-            return "ssh://"+getUsername()+":"+(getUserPassword()!=null?getUserPassword():"")+"@"+repositoryUrl;
-        }else{
-            return "ssh://"+repositoryUrl;
+    public String getFullRepositoryUrl() throws URISyntaxException,RepositoryException {
+        URIish urish = new URIish(repositoryUrl);
+        //if no protocol specified in url, then ssh is used
+        if(urish.getScheme().equals("ssh")||urish.getScheme()==null){
+            if(getUsername()!=null){
+                return "ssh://"+getUsername()+":"+(getUserPassword()!=null?getUserPassword():"")+"@"+urish.getHost()+ ( urish.getPort()!=-1 ? (":"+urish.getPort()):"") + urish.getPath() ;
+            }else{
+                return "ssh://"+repositoryUrl;
+            }
         }
+        else if(urish.getScheme().equals("git")){
+            return repositoryUrl;
+        }
+        throw new RepositoryException("Invalid protocol. Only ssh and git protocols are supported");
     }
 
     public void setRemoteBranch(String remoteBranch){
@@ -545,9 +553,8 @@ public class GitRepository extends AbstractRepository implements WebRepositoryEn
             return UNKNOWN_HOST;
         }
         try {
-            URL url = new URL(getFullRepositoryUrl());
-            return url.getHost();
-        } catch (MalformedURLException e) {
+            return new URIish(repositoryUrl).getHost();
+        } catch (Exception e) {
             return UNKNOWN_HOST;
         }
     }
